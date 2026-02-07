@@ -1,7 +1,6 @@
 package ast
 
 import (
-	"fmt"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -18,10 +17,6 @@ type DefNode struct {
 	EndChar   uint
 }
 
-// Check if a definition appears before the cursor position
-// Definition is before cursor if:
-//  1. Definition line <= cursor line, OR
-//  2. Same line but definition column < cursor column
 func (d *DefNode) isBeforeCursor(cursor Cursor) bool {
 	if d.StartLine <= cursor.Line {
 		return true
@@ -32,7 +27,6 @@ func (d *DefNode) isBeforeCursor(cursor Cursor) bool {
 	return false
 }
 
-// Check if DefNode comes after otherDef source code
 func (d *DefNode) isDefinitionAfter(otherDef *DefNode) bool {
 	if d.StartLine > otherDef.StartLine {
 		return true
@@ -43,208 +37,227 @@ func (d *DefNode) isDefinitionAfter(otherDef *DefNode) bool {
 	return false
 }
 
-// Check if two DefNode instances represent the same definition
 func (d *DefNode) isSameDefinition(def2 *DefNode) bool {
 	return d.StartLine == def2.StartLine &&
 		d.StartChar == def2.StartChar &&
 		d.Name == def2.Name
 }
 
-// Identify DefNodes with tracking processed scoped assignments to avoid duplicates
-func (a *Ast) DefNodes() []DefNode {
-	defNodes := []DefNode{}
+func assignToDefNode(assignNode *syntax.Assign) *DefNode {
+	if assignNode.Name == nil {
+		return nil
+	}
 
-	processedScopedAssignments := make(map[string]bool) // key: "line:col:name"
+	name := assignNode.Name.Value
+	startLine, startChar := assignNode.Name.Pos().Line(), assignNode.Name.Pos().Col()
+	endLine, endChar := assignNode.Name.End().Line(), assignNode.Name.End().Col()
 
-	syntax.Walk(a.File, func(node syntax.Node) bool {
-		var name string
-		var startLine, startChar, endLine, endChar uint
-		var enclosingFunc *syntax.FuncDecl
-		var isScoped bool
+	return &DefNode{
+		Node:      assignNode,
+		Name:      name,
+		Scope:     nil,
+		IsScoped:  false,
+		StartLine: startLine,
+		StartChar: startChar,
+		EndLine:   endLine,
+		EndChar:   endChar,
+	}
 
-		switch n := node.(type) {
-		// Variable Assignment that are not part done within a DeclClause (`local`, etc.)
-		// These are always global (even inside functions)
-		case *syntax.Assign:
-			if n.Name != nil {
-				name = n.Name.Value
-				startLine, startChar = n.Name.Pos().Line(), n.Name.Pos().Col()
-				endLine, endChar = n.Name.End().Line(), n.Name.End().Col()
+}
 
-				// Check if this assignment is part of a scoped declaration and skip if it is
-				assignmentKey := fmt.Sprintf("%d:%d:%s", startLine, startChar, name)
-				if processedScopedAssignments[assignmentKey] {
-					return true
-				}
+func funcDeclToDefNode(funcDecl *syntax.FuncDecl) *DefNode {
+	if funcDecl.Name == nil {
+		return nil
+	}
 
-				// Check if we're inside a function
-				enclosingFunc = a.findEnclosingFunctionForNode(n)
-				// Regular assignments are not scoped (they're global even in functions)
-				isScoped = false
-			}
+	name := funcDecl.Name.Value
+	startLine, startChar := funcDecl.Name.Pos().Line(), funcDecl.Name.Pos().Col()
+	endLine, endChar := funcDecl.Name.End().Line(), funcDecl.Name.End().Col()
 
-		// Scoped Variable Declaration with `local`, `declare`, `typeset`
-		// These are scoped if inside a function
-		case *syntax.DeclClause:
-			cmd := n.Variant.Value
-			if cmd == "local" || cmd == "declare" || cmd == "typeset" {
-				enclosingFunc = a.findEnclosingFunctionForNode(n)
-				isScoped = (enclosingFunc != nil)
+	return &DefNode{
+		Node:      funcDecl,
+		Name:      name,
+		Scope:     nil,
+		IsScoped:  false,
+		StartLine: startLine,
+		StartChar: startChar,
+		EndLine:   endLine,
+		EndChar:   endChar,
+	}
+}
 
-				for _, arg := range n.Args {
-					if arg.Name != nil {
-						name = arg.Name.Value
-						startLine, startChar = arg.Name.ValuePos.Line(), arg.Name.ValuePos.Col()
-						endLine, endChar = arg.Name.ValueEnd.Line(), arg.Name.ValueEnd.Col()
+func declClauseToDefNode(declClause *syntax.DeclClause, scope *syntax.FuncDecl) []DefNode {
+	cmd := declClause.Variant.Value
+	if cmd != "local" && cmd != "declare" && cmd != "typeset" {
+		return nil
+	}
 
-						assignmentKey := fmt.Sprintf("%d:%d:%s", startLine, startChar, name)
-						processedScopedAssignments[assignmentKey] = true
+	var defNodes []DefNode
+	for _, arg := range declClause.Args {
+		if arg.Name != nil {
+			name := arg.Name.Value
+			startLine, startChar := arg.Name.ValuePos.Line(), arg.Name.ValuePos.Col()
+			endLine, endChar := arg.Name.ValueEnd.Line(), arg.Name.ValueEnd.Col()
 
-						defNodes = append(defNodes, DefNode{
-							Node:      n,
-							Name:      name,
-							Scope:     enclosingFunc,
-							IsScoped:  isScoped,
-							StartLine: startLine,
-							StartChar: startChar,
-							EndLine:   endLine,
-							EndChar:   endChar,
-						})
-					}
-				}
-				return true
-			}
-			// If it's not a scoped declaration, don't process it here
-			return true
-
-		// Function Definition (always global)
-		case *syntax.FuncDecl:
-			if n.Name != nil {
-				name = n.Name.Value
-				startLine, startChar = n.Name.Pos().Line(), n.Name.Pos().Col()
-				endLine, endChar = n.Name.End().Line(), n.Name.End().Col()
-				enclosingFunc = nil
-				isScoped = false
-			}
-
-		// Iteration variable in for/select loops
-		case *syntax.ForClause:
-			enclosingFunc = a.findEnclosingFunctionForNode(n)
-			isScoped = (enclosingFunc != nil)
-
-			switch loop := n.Loop.(type) {
-			case *syntax.WordIter:
-				if loop.Name != nil {
-					name = loop.Name.Value
-					startLine, startChar = loop.Name.Pos().Line(), loop.Name.Pos().Col()
-					endLine, endChar = loop.Name.End().Line(), loop.Name.End().Col()
-				}
-			case *syntax.CStyleLoop:
-				if loop.Init != nil {
-					a, ok := loop.Init.(*syntax.BinaryArithm)
-					if !ok {
-						return true
-					}
-					if a.Op == syntax.Assgn {
-						word, ok := a.X.(*syntax.Word)
-						if !ok {
-							return true
-						}
-						for _, wp := range word.Parts {
-							switch p := wp.(type) {
-							case *syntax.Lit:
-								name = p.Value
-								startLine, startChar = p.Pos().Line(), p.Pos().Col()
-								endLine, endChar = p.End().Line(), p.End().Col()
-							}
-						}
-					}
-				}
-			}
-
-		// Variable "assignment" in `read` statements
-		case *syntax.CallExpr:
-			if len(n.Args) < 2 {
-				return true
-			}
-			cmdName := ExtractIdentifier(n.Args[0])
-			if cmdName != "read" {
-				return true
-			}
-
-			// Read variables are scoped to function if inside one
-			enclosingFunc = a.findEnclosingFunctionForNode(n)
-			isScoped = (enclosingFunc != nil) // Only scoped if inside a function
-
-			for _, arg := range n.Args[1:] {
-				name = ExtractIdentifier(arg)
-				if name != "" && !strings.HasPrefix(name, "-") {
-					startLine, startChar = arg.Pos().Line(), arg.Pos().Col()
-					endLine, endChar = arg.End().Line(), arg.End().Col()
-					defNodes = append(defNodes, DefNode{
-						Node:      n,
-						Name:      name,
-						Scope:     enclosingFunc,
-						IsScoped:  isScoped,
-						StartLine: startLine,
-						StartChar: startChar,
-						EndLine:   endLine,
-						EndChar:   endChar,
-					})
-				}
-			}
-			return true
-		}
-
-		// Add the definition if we found a name
-		if name != "" {
 			defNodes = append(defNodes, DefNode{
-				Node:      node,
+				Node:      declClause,
 				Name:      name,
-				Scope:     enclosingFunc,
-				IsScoped:  isScoped,
+				Scope:     scope,
+				IsScoped:  scope != nil,
 				StartLine: startLine,
 				StartChar: startChar,
 				EndLine:   endLine,
 				EndChar:   endChar,
 			})
 		}
+	}
+	return defNodes
+}
+func forClauseToDefNode(forClause *syntax.ForClause, scope *syntax.FuncDecl) *DefNode {
+	var name string
+	var startLine, startChar, endLine, endChar uint
 
-		return true
+	switch loop := forClause.Loop.(type) {
+	case *syntax.WordIter:
+		if loop.Name == nil {
+			return nil
+		}
+		name = loop.Name.Value
+		startLine, startChar = loop.Name.Pos().Line(), loop.Name.Pos().Col()
+		endLine, endChar = loop.Name.End().Line(), loop.Name.End().Col()
+
+	case *syntax.CStyleLoop:
+		if loop.Init == nil {
+			return nil
+		}
+		a, ok := loop.Init.(*syntax.BinaryArithm)
+		if !ok {
+			return nil
+		}
+		if a.Op == syntax.Assgn {
+			word, ok := a.X.(*syntax.Word)
+			if !ok {
+				return nil
+			}
+			for _, wp := range word.Parts {
+				switch p := wp.(type) {
+				case *syntax.Lit:
+					name = p.Value
+					startLine, startChar = p.Pos().Line(), p.Pos().Col()
+					endLine, endChar = p.End().Line(), p.End().Col()
+				}
+			}
+		}
+	}
+
+	if name == "" {
+		return nil
+	}
+
+	return &DefNode{
+		Node:      forClause,
+		Name:      name,
+		Scope:     scope,
+		IsScoped:  scope != nil,
+		StartLine: startLine,
+		StartChar: startChar,
+		EndLine:   endLine,
+		EndChar:   endChar,
+	}
+}
+
+func callExprToDefNode(callExpr *syntax.CallExpr, scope *syntax.FuncDecl) []DefNode {
+	if len(callExpr.Args) < 2 {
+		return nil
+	}
+	cmdName := ExtractIdentifier(callExpr.Args[0])
+	if cmdName != "read" {
+		return nil
+	}
+
+	var defNodes []DefNode
+	for _, arg := range callExpr.Args[1:] {
+		name := ExtractIdentifier(arg)
+		if name == "" || strings.HasPrefix(name, "-") {
+			continue
+		}
+
+		startLine, startChar := arg.Pos().Line(), arg.Pos().Col()
+		endLine, endChar := arg.End().Line(), arg.End().Col()
+		defNodes = append(defNodes, DefNode{
+			Node:      callExpr,
+			Name:      name,
+			Scope:     scope,
+			IsScoped:  scope != nil,
+			StartLine: startLine,
+			StartChar: startChar,
+			EndLine:   endLine,
+			EndChar:   endChar,
+		})
+	}
+	return defNodes
+}
+
+func handleNode(node syntax.Node, scope *syntax.FuncDecl) ([]DefNode, bool) {
+	descent := true
+	var defNodes []DefNode
+	switch n := node.(type) {
+	case *syntax.Assign:
+		if defNode := assignToDefNode(n); defNode != nil {
+			defNodes = append(defNodes, *defNode)
+		}
+
+	case *syntax.DeclClause:
+		if nodes := declClauseToDefNode(n, scope); len(nodes) > 0 {
+			defNodes = append(defNodes, nodes...)
+		}
+		descent = false
+
+	case *syntax.ForClause:
+		if defNode := forClauseToDefNode(n, scope); defNode != nil {
+			defNodes = append(defNodes, *defNode)
+		}
+
+	case *syntax.CallExpr:
+		if nodes := callExprToDefNode(n, scope); len(nodes) > 0 {
+			defNodes = append(defNodes, nodes...)
+		}
+
+	}
+
+	return defNodes, descent
+}
+
+func (a *Ast) DefNodes() []DefNode {
+	defNodes := []DefNode{}
+
+	syntax.Walk(a.File, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.FuncDecl:
+			if defNode := funcDeclToDefNode(n); defNode != nil {
+				defNodes = append(defNodes, *defNode)
+			}
+			syntax.Walk(n.Body, func(innerNode syntax.Node) bool {
+				nodes, descent := handleNode(innerNode, n)
+				if len(nodes) > 0 {
+					defNodes = append(defNodes, nodes...)
+				}
+				return descent
+			})
+			return false
+		}
+
+		nodes, descent := handleNode(node, nil);
+		if len(nodes) > 0 {
+			defNodes = append(defNodes, nodes...)
+		}
+
+		return descent
 	})
 
 	return defNodes
 }
 
-// Helper function to find the enclosing function for a given node
-// Check if the target node is within this function's bounds
-// Target is inside function if: fnStart <= targetStart < targetEnd <= fnEnd
-func (a *Ast) findEnclosingFunctionForNode(targetNode syntax.Node) *syntax.FuncDecl {
-	var enclosingFunc *syntax.FuncDecl
-	targetStart := targetNode.Pos()
-	targetEnd := targetNode.End()
-
-	syntax.Walk(a.File, func(node syntax.Node) bool {
-		fn, ok := node.(*syntax.FuncDecl)
-		if !ok {
-			return true
-		}
-
-		fnStart, fnEnd := fn.Pos(), fn.End()
-
-		if (fnStart.Line() < targetStart.Line() ||
-			(fnStart.Line() == targetStart.Line() && fnStart.Col() <= targetStart.Col())) &&
-			(targetEnd.Line() < fnEnd.Line() ||
-				(targetEnd.Line() == fnEnd.Line() && targetEnd.Col() <= fnEnd.Col())) {
-			enclosingFunc = fn
-		}
-		return true
-	})
-
-	return enclosingFunc
-}
-
-// Updated FindDefInFile that uses the unified DefNodes
 func (a *Ast) FindDefInFile(cursor Cursor) *DefNode {
 	cursorNode := a.FindNodeUnderCursor(cursor)
 	targetIdentifier := ExtractIdentifier(cursorNode)
