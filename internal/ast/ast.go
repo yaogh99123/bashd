@@ -12,7 +12,6 @@ type Cursor struct {
 	Col  uint
 }
 
-// Otherwise I will mess that up for sure. In the LSP 0-based, in the parser 1-based
 func NewCursor(lspLine, lspCol uint) Cursor {
 	return Cursor{Line: lspLine + 1, Col: lspCol + 1}
 }
@@ -23,27 +22,21 @@ func (c *Cursor) isCursorInNode(node syntax.Node) bool {
 	endLine := node.End().Line()
 	endCol := node.End().Col()
 
-	// Compare lines first
 	if c.Line < startLine || c.Line > endLine {
 		return false
 	}
 
 	if startLine == endLine {
-		// Node is on a single line
 		return c.Line == startLine &&
 			c.Col >= startCol && c.Col <= endCol
 	}
 
-	// Multi-line node
 	switch c.Line {
 	case startLine:
-		// On first line of node: col must be >= start.Col()
 		return c.Col >= startCol
 	case endLine:
-		// On last line of node: col must be <= end.Col()
 		return c.Col <= endCol
 	default:
-		// Any line in between start and end line is inside
 		return true
 	}
 }
@@ -76,7 +69,6 @@ func (a *Ast) FindNodeUnderCursor(cursor Cursor) syntax.Node {
 		}
 		if cursor.isCursorInNode(node) {
 			found = node
-			// Continue walking to find deepest node containing cursor
 			return true
 		}
 		return true
@@ -144,13 +136,12 @@ func extractAndExpandWord(word *syntax.Word, env map[string]string) string {
 			}
 		}
 	}
-	// Expand things like $HOME and ${VAR}
+
 	return os.Expand(b.String(), func(key string) string {
 		return env[key]
 	})
 }
 
-// Functions are the only contructs with scope
 func (a *Ast) findEnclosingFunction(cursor Cursor) *syntax.FuncDecl {
 	var enclosingFunc *syntax.FuncDecl
 

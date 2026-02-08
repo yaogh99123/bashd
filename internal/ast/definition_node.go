@@ -9,8 +9,8 @@ import (
 type DefNode struct {
 	Node      syntax.Node
 	Name      string
-	Scope     *syntax.FuncDecl // nil for global scope
-	IsScoped  bool             // true for local/declare/typeset variables
+	Scope     *syntax.FuncDecl
+	IsScoped  bool
 	StartLine uint
 	StartChar uint
 	EndLine   uint
@@ -41,6 +41,97 @@ func (d *DefNode) isSameDefinition(def2 *DefNode) bool {
 	return d.StartLine == def2.StartLine &&
 		d.StartChar == def2.StartChar &&
 		d.Name == def2.Name
+}
+
+func (a *Ast) DefNodes() []DefNode {
+	defNodes := []DefNode{}
+
+	syntax.Walk(a.File, func(node syntax.Node) bool {
+		nodes, descent := syntaxNodeToDefNode(node, nil)
+		if len(nodes) > 0 {
+			defNodes = append(defNodes, nodes...)
+		}
+
+		return descent
+	})
+
+	return defNodes
+}
+
+func (a *Ast) FindDefInFile(cursor Cursor) *DefNode {
+	cursorNode := a.FindNodeUnderCursor(cursor)
+	targetIdentifier := ExtractIdentifier(cursorNode)
+	if targetIdentifier == "" {
+		return nil
+	}
+
+	cursorScope := a.findEnclosingFunction(cursor)
+
+	// Find scoped variables in the same function scope as cursor
+	if cursorScope != nil {
+		for _, defNode := range a.DefNodes() {
+			if defNode.Name == targetIdentifier && defNode.IsScoped && defNode.Scope == cursorScope {
+				// Check if the scoped variable is declared before the cursor position (shadowing)
+				if defNode.isBeforeCursor(cursor) {
+					return &defNode
+				}
+			}
+		}
+	}
+
+	// Find global definitions i.e., functions and non-scoped variables
+	for _, defNode := range a.DefNodes() {
+		if defNode.Name == targetIdentifier {
+			if defNode.IsScoped {
+				continue
+			}
+			return &defNode
+		}
+	}
+
+	return nil
+}
+
+func syntaxNodeToDefNode(node syntax.Node, scope *syntax.FuncDecl) ([]DefNode, bool) {
+	descent := true
+	var defNodes []DefNode
+	switch n := node.(type) {
+	case *syntax.Assign:
+		if defNode := assignToDefNode(n); defNode != nil {
+			defNodes = append(defNodes, *defNode)
+		}
+
+	case *syntax.DeclClause:
+		if nodes := declClauseToDefNode(n, scope); len(nodes) > 0 {
+			defNodes = append(defNodes, nodes...)
+		}
+		descent = false
+
+	case *syntax.ForClause:
+		if defNode := forClauseToDefNode(n, scope); defNode != nil {
+			defNodes = append(defNodes, *defNode)
+		}
+
+	case *syntax.CallExpr:
+		if nodes := callExprToDefNode(n, scope); len(nodes) > 0 {
+			defNodes = append(defNodes, nodes...)
+		}
+
+	case *syntax.FuncDecl:
+		if defNode := funcDeclToDefNode(n); defNode != nil {
+			defNodes = append(defNodes, *defNode)
+		}
+		syntax.Walk(n.Body, func(innerNode syntax.Node) bool {
+			nodes, descent := syntaxNodeToDefNode(innerNode, n)
+			if len(nodes) > 0 {
+				defNodes = append(defNodes, nodes...)
+			}
+			return descent
+		})
+		descent = false
+	}
+
+	return defNodes, descent
 }
 
 func assignToDefNode(assignNode *syntax.Assign) *DefNode {
@@ -113,6 +204,7 @@ func declClauseToDefNode(declClause *syntax.DeclClause, scope *syntax.FuncDecl) 
 	}
 	return defNodes
 }
+
 func forClauseToDefNode(forClause *syntax.ForClause, scope *syntax.FuncDecl) *DefNode {
 	var name string
 	var startLine, startChar, endLine, endChar uint
@@ -196,98 +288,4 @@ func callExprToDefNode(callExpr *syntax.CallExpr, scope *syntax.FuncDecl) []DefN
 		})
 	}
 	return defNodes
-}
-
-func handleNode(node syntax.Node, scope *syntax.FuncDecl) ([]DefNode, bool) {
-	descent := true
-	var defNodes []DefNode
-	switch n := node.(type) {
-	case *syntax.Assign:
-		if defNode := assignToDefNode(n); defNode != nil {
-			defNodes = append(defNodes, *defNode)
-		}
-
-	case *syntax.DeclClause:
-		if nodes := declClauseToDefNode(n, scope); len(nodes) > 0 {
-			defNodes = append(defNodes, nodes...)
-		}
-		descent = false
-
-	case *syntax.ForClause:
-		if defNode := forClauseToDefNode(n, scope); defNode != nil {
-			defNodes = append(defNodes, *defNode)
-		}
-
-	case *syntax.CallExpr:
-		if nodes := callExprToDefNode(n, scope); len(nodes) > 0 {
-			defNodes = append(defNodes, nodes...)
-		}
-
-	}
-
-	return defNodes, descent
-}
-
-func (a *Ast) DefNodes() []DefNode {
-	defNodes := []DefNode{}
-
-	syntax.Walk(a.File, func(node syntax.Node) bool {
-		switch n := node.(type) {
-		case *syntax.FuncDecl:
-			if defNode := funcDeclToDefNode(n); defNode != nil {
-				defNodes = append(defNodes, *defNode)
-			}
-			syntax.Walk(n.Body, func(innerNode syntax.Node) bool {
-				nodes, descent := handleNode(innerNode, n)
-				if len(nodes) > 0 {
-					defNodes = append(defNodes, nodes...)
-				}
-				return descent
-			})
-			return false
-		}
-
-		nodes, descent := handleNode(node, nil);
-		if len(nodes) > 0 {
-			defNodes = append(defNodes, nodes...)
-		}
-
-		return descent
-	})
-
-	return defNodes
-}
-
-func (a *Ast) FindDefInFile(cursor Cursor) *DefNode {
-	cursorNode := a.FindNodeUnderCursor(cursor)
-	targetIdentifier := ExtractIdentifier(cursorNode)
-	if targetIdentifier == "" {
-		return nil
-	}
-
-	cursorScope := a.findEnclosingFunction(cursor)
-
-	// Find scoped variables in the same function scope as cursor
-	if cursorScope != nil {
-		for _, defNode := range a.DefNodes() {
-			if defNode.Name == targetIdentifier && defNode.IsScoped && defNode.Scope == cursorScope {
-				// Check if the scoped variable is declared before the cursor position (shadowing)
-				if defNode.isBeforeCursor(cursor) {
-					return &defNode
-				}
-			}
-		}
-	}
-
-	// Find global definitions i.e., functions and non-scoped variables
-	for _, defNode := range a.DefNodes() {
-		if defNode.Name == targetIdentifier {
-			if defNode.IsScoped {
-				continue
-			}
-			return &defNode
-		}
-	}
-
-	return nil
 }

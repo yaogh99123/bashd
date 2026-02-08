@@ -61,6 +61,106 @@ func paramExpToRefNode(paramExp *syntax.ParamExp) *RefNode {
 	}
 }
 
+func (a *Ast) RefNodes(includeDeclaration bool) []RefNode {
+	refNodes := []RefNode{}
+
+	syntax.Walk(a.File, func(node syntax.Node) bool {
+		nodes, descent := syntaxNodeToRefNode(node, nil, includeDeclaration)
+		if len(nodes) > 0 {
+			refNodes = append(refNodes, nodes...)
+		}
+
+		return descent
+	})
+
+	return refNodes
+}
+
+func (a *Ast) FindRefsInFile(cursor Cursor, includeDeclaration bool) []RefNode {
+	cursorNode := a.FindNodeUnderCursor(cursor)
+	targetIdentifier := ExtractIdentifier(cursorNode)
+	if targetIdentifier == "" {
+		return nil
+	}
+	slog.Info("REFS", "includeDeclaration", includeDeclaration)
+
+	references := []RefNode{}
+
+	defNode := a.FindDefInFile(cursor)
+
+	slog.Info("FINDREFS", "DEFNODE", defNode)
+
+	if defNode == nil {
+		// No definition found - return all references with same name (fallback behavior)
+		for _, refNode := range a.RefNodes(includeDeclaration) {
+			if refNode.Name == targetIdentifier {
+				references = append(references, refNode)
+			}
+		}
+		return references
+	}
+
+	// Definition found - find all references that would resolve to this same definition
+	for _, refNode := range a.RefNodes(includeDeclaration) {
+		if refNode.Name != targetIdentifier {
+			continue
+		}
+
+		if a.wouldResolveToSameDefinition(refNode.Node, defNode) {
+			references = append(references, refNode)
+		}
+	}
+
+	return references
+}
+
+func syntaxNodeToRefNode(node syntax.Node, scope *syntax.FuncDecl, includeDeclaration bool) ([]RefNode, bool) {
+	descent := true
+	var refNodes []RefNode
+	switch n := node.(type) {
+	case *syntax.Assign:
+		if refNode := assignToRefNode(n, includeDeclaration); refNode != nil {
+			refNodes = append(refNodes, *refNode)
+		}
+
+	case *syntax.DeclClause:
+		if nodes := declClauseToRefNode(n, scope, includeDeclaration); len(nodes) > 0 {
+			refNodes = append(refNodes, nodes...)
+		}
+		descent = false
+
+	case *syntax.ForClause:
+		if refNode := forClauseToRefNode(n, includeDeclaration); refNode != nil {
+			refNodes = append(refNodes, *refNode)
+		}
+
+	case *syntax.CallExpr:
+		if refNode := callExprToRefNode(n, scope, includeDeclaration); refNode != nil {
+			refNodes = append(refNodes, *refNode)
+		}
+
+	case *syntax.FuncDecl:
+		if refNode := funcDeclToRefNode(n, includeDeclaration); refNode != nil {
+			refNodes = append(refNodes, *refNode)
+		}
+		syntax.Walk(n.Body, func(innerNode syntax.Node) bool {
+			nodes, descent := syntaxNodeToRefNode(innerNode, n, includeDeclaration)
+			if len(nodes) > 0 {
+				refNodes = append(refNodes, nodes...)
+			}
+			return descent
+		})
+		descent = false
+
+	case *syntax.ParamExp:
+		if refNode := paramExpToRefNode(n); refNode != nil {
+			refNodes = append(refNodes, *refNode)
+		}
+	}
+
+	return refNodes, descent
+}
+
 func callExprToRefNode(callExpr *syntax.CallExpr, scope *syntax.FuncDecl, includeDeclaration bool) *RefNode {
 	var name string
 	var startLine, startChar, endLine, endChar uint
@@ -229,106 +329,6 @@ func forClauseToRefNode(forClause *syntax.ForClause, includeDeclaration bool) *R
 		EndChar:   endChar,
 	}
 
-}
-
-func syntaxNodeToRefNode(node syntax.Node, scope *syntax.FuncDecl, includeDeclaration bool) ([]RefNode, bool) {
-	descent := true
-	var refNodes []RefNode
-	switch n := node.(type) {
-	case *syntax.Assign:
-		if refNode := assignToRefNode(n, includeDeclaration); refNode != nil {
-			refNodes = append(refNodes, *refNode)
-		}
-
-	case *syntax.DeclClause:
-		if nodes := declClauseToRefNode(n, scope, includeDeclaration); len(nodes) > 0 {
-			refNodes = append(refNodes, nodes...)
-		}
-		descent = false
-
-	case *syntax.ForClause:
-		if refNode := forClauseToRefNode(n, includeDeclaration); refNode != nil {
-			refNodes = append(refNodes, *refNode)
-		}
-
-	case *syntax.CallExpr:
-		if refNode := callExprToRefNode(n, scope, includeDeclaration); refNode != nil {
-			refNodes = append(refNodes, *refNode)
-		}
-
-	case *syntax.FuncDecl:
-		if refNode := funcDeclToRefNode(n, includeDeclaration); refNode != nil {
-			refNodes = append(refNodes, *refNode)
-		}
-		syntax.Walk(n.Body, func(innerNode syntax.Node) bool {
-			nodes, descent := syntaxNodeToRefNode(innerNode, n, includeDeclaration)
-			if len(nodes) > 0 {
-				refNodes = append(refNodes, nodes...)
-			}
-			return descent
-		})
-		descent = false
-
-	case *syntax.ParamExp:
-		if refNode := paramExpToRefNode(n); refNode != nil {
-			refNodes = append(refNodes, *refNode)
-		}
-	}
-
-	return refNodes, descent
-}
-
-func (a *Ast) RefNodes(includeDeclaration bool) []RefNode {
-	refNodes := []RefNode{}
-
-	syntax.Walk(a.File, func(node syntax.Node) bool {
-		nodes, descent := syntaxNodeToRefNode(node, nil, includeDeclaration)
-		if len(nodes) > 0 {
-			refNodes = append(refNodes, nodes...)
-		}
-
-		return descent
-	})
-
-	return refNodes
-}
-
-func (a *Ast) FindRefsInFile(cursor Cursor, includeDeclaration bool) []RefNode {
-	cursorNode := a.FindNodeUnderCursor(cursor)
-	targetIdentifier := ExtractIdentifier(cursorNode)
-	if targetIdentifier == "" {
-		return nil
-	}
-	slog.Info("REFS", "includeDeclaration", includeDeclaration)
-
-	references := []RefNode{}
-
-	defNode := a.FindDefInFile(cursor)
-
-	slog.Info("FINDREFS", "DEFNODE", defNode)
-
-	if defNode == nil {
-		// No definition found - return all references with same name (fallback behavior)
-		for _, refNode := range a.RefNodes(includeDeclaration) {
-			if refNode.Name == targetIdentifier {
-				references = append(references, refNode)
-			}
-		}
-		return references
-	}
-
-	// Definition found - find all references that would resolve to this same definition
-	for _, refNode := range a.RefNodes(includeDeclaration) {
-		if refNode.Name != targetIdentifier {
-			continue
-		}
-
-		if a.wouldResolveToSameDefinition(refNode.Node, defNode) {
-			references = append(references, refNode)
-		}
-	}
-
-	return references
 }
 
 func (a *Ast) wouldResolveToSameDefinition(refCursorNode syntax.Node, targetDefNode *DefNode) bool {
