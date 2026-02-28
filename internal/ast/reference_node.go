@@ -159,10 +159,14 @@ func syntaxNodeToRefNode(node syntax.Node, scope *syntax.FuncDecl, includeDeclar
 		}
 
 	case *syntax.ArithmExp:
-		if nodes := arithmExpToRefNode(n, scope); len(nodes) > 0 {
+		if nodes := arithmExprToRefNode(n.X, scope, n); len(nodes) > 0 {
 			refNodes = append(refNodes, nodes...)
 		}
 
+	case *syntax.ArithmCmd:
+		if nodes := arithmExprToRefNode(n.X, scope, n); len(nodes) > 0 {
+			refNodes = append(refNodes, nodes...)
+		}
 	}
 
 	return refNodes, descent
@@ -338,50 +342,50 @@ func forClauseToRefNode(forClause *syntax.ForClause, includeDeclaration bool) *R
 
 }
 
-func arithmExpToRefNode(arithmExp *syntax.ArithmExp, scope *syntax.FuncDecl) []RefNode {
-    var refNodes []RefNode
+func arithmExprToRefNode(arithmExpr syntax.ArithmExpr, scope *syntax.FuncDecl, parent syntax.Node) []RefNode {
+	var refNodes []RefNode
 
-    var walkArithm func(syntax.ArithmExpr)
-    walkArithm = func(expr syntax.ArithmExpr) {
-        switch e := expr.(type) {
+	var walkArithm func(syntax.ArithmExpr)
+	walkArithm = func(expr syntax.ArithmExpr) {
+		switch e := expr.(type) {
 
-        case *syntax.Word:
-            for _, wp := range e.Parts {
-                if lit, ok := wp.(*syntax.Lit); ok {
-                    name := lit.Value
+		case *syntax.Word:
+			for _, wp := range e.Parts {
+				if lit, ok := wp.(*syntax.Lit); ok {
+					name := lit.Value
 
-                    // Ignore numbers
-                    if _, err := strconv.Atoi(name); err == nil {
-                        continue
-                    }
+					// Ignore numbers
+					if _, err := strconv.Atoi(name); err == nil {
+						continue
+					}
 
-                    refNodes = append(refNodes, RefNode{
-                        Node:      arithmExp,
-                        Name:      name,
-                        Scope:     scope,
-                        StartLine: lit.Pos().Line(),
-                        StartChar: lit.Pos().Col(),
-                        EndLine:   lit.End().Line(),
-                        EndChar:   lit.End().Col(),
-                    })
-                }
-            }
+					refNodes = append(refNodes, RefNode{
+						Node:      parent,
+						Name:      name,
+						Scope:     scope,
+						StartLine: lit.Pos().Line(),
+						StartChar: lit.Pos().Col(),
+						EndLine:   lit.End().Line(),
+						EndChar:   lit.End().Col(),
+					})
+				}
+			}
 
-        case *syntax.BinaryArithm:
-            walkArithm(e.X)
-            walkArithm(e.Y)
+		case *syntax.BinaryArithm:
+			walkArithm(e.X)
+			walkArithm(e.Y)
 
-        case *syntax.UnaryArithm:
-            walkArithm(e.X)
+		case *syntax.UnaryArithm:
+			walkArithm(e.X)
 
-        case *syntax.ParenArithm:
-            walkArithm(e.X)
-        }
-    }
+		case *syntax.ParenArithm:
+			walkArithm(e.X)
+		}
+	}
 
-    walkArithm(arithmExp.X)
+	walkArithm(arithmExpr)
 
-    return refNodes
+	return refNodes
 }
 
 func (a *Ast) wouldResolveToSameDefinition(refCursorNode syntax.Node, targetDefNode *DefNode) bool {
