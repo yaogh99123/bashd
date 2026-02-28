@@ -1,7 +1,6 @@
 package ast
 
 import (
-	"log/slog"
 	"strconv"
 
 	"github.com/matkrin/bashd/internal/lsp"
@@ -83,17 +82,16 @@ func (a *Ast) FindRefsInFile(cursor Cursor, includeDeclaration bool) []RefNode {
 	if targetIdentifier == "" {
 		return nil
 	}
-	slog.Info("REFS", "includeDeclaration", includeDeclaration)
 
 	references := []RefNode{}
 
 	defNode := a.FindDefInFile(cursor)
 
-	slog.Info("FINDREFS", "DEFNODE", defNode)
+	allRefNodes := a.RefNodes(includeDeclaration)
 
 	if defNode == nil {
-		// No definition found - return all references with same name (fallback behavior)
-		for _, refNode := range a.RefNodes(includeDeclaration) {
+		// No definition found - return all references with same name (fallback)
+		for _, refNode := range allRefNodes {
 			if refNode.Name == targetIdentifier {
 				references = append(references, refNode)
 			}
@@ -101,8 +99,7 @@ func (a *Ast) FindRefsInFile(cursor Cursor, includeDeclaration bool) []RefNode {
 		return references
 	}
 
-	// Definition found - find all references that would resolve to this same definition
-	for _, refNode := range a.RefNodes(includeDeclaration) {
+	for _, refNode := range allRefNodes {
 		if refNode.Name != targetIdentifier {
 			continue
 		}
@@ -131,8 +128,8 @@ func syntaxNodeToRefNode(node syntax.Node, scope *syntax.FuncDecl, includeDeclar
 		descent = false
 
 	case *syntax.ForClause:
-		if refNode := forClauseToRefNode(n, includeDeclaration); refNode != nil {
-			refNodes = append(refNodes, *refNode)
+		if nodes := forClauseToRefNode(n, scope, includeDeclaration); len(nodes) > 0 {
+			refNodes = append(refNodes, nodes...)
 		}
 
 	case *syntax.CallExpr:
@@ -159,12 +156,12 @@ func syntaxNodeToRefNode(node syntax.Node, scope *syntax.FuncDecl, includeDeclar
 		}
 
 	case *syntax.ArithmExp:
-		if nodes := arithmExprToRefNode(n.X, scope, n); len(nodes) > 0 {
+		if nodes := arithmExprToRefNode(n.X, scope); len(nodes) > 0 {
 			refNodes = append(refNodes, nodes...)
 		}
 
 	case *syntax.ArithmCmd:
-		if nodes := arithmExprToRefNode(n.X, scope, n); len(nodes) > 0 {
+		if nodes := arithmExprToRefNode(n.X, scope); len(nodes) > 0 {
 			refNodes = append(refNodes, nodes...)
 		}
 	}
@@ -291,58 +288,49 @@ func declClauseToRefNode(declClause *syntax.DeclClause, scope *syntax.FuncDecl, 
 	return refNodes
 }
 
-func forClauseToRefNode(forClause *syntax.ForClause, includeDeclaration bool) *RefNode {
+func forClauseToRefNode(forClause *syntax.ForClause, scope *syntax.FuncDecl, includeDeclaration bool) []RefNode {
 	if !includeDeclaration {
 		return nil
 	}
 
-	var name string
-	var startLine, startChar, endLine, endChar uint
-
+	var refNodes []RefNode
 	switch loop := forClause.Loop.(type) {
 	case *syntax.WordIter:
 		if loop.Name != nil {
-			name = loop.Name.Value
-			startLine, startChar = loop.Name.Pos().Line(), loop.Name.Pos().Col()
-			endLine, endChar = loop.Name.End().Line(), loop.Name.End().Col()
+			name := loop.Name.Value
+			startLine, startChar := loop.Name.Pos().Line(), loop.Name.Pos().Col()
+			endLine, endChar := loop.Name.End().Line(), loop.Name.End().Col()
+			refNodes = append(refNodes, RefNode{
+				Node:      forClause,
+				Name:      name,
+				Scope:     scope,
+				StartLine: startLine,
+				StartChar: startChar,
+				EndLine:   endLine,
+				EndChar:   endChar,
+			})
 		}
 
 	case *syntax.CStyleLoop:
 		if loop.Init != nil {
-			a, ok := loop.Init.(*syntax.BinaryArithm)
-			if !ok {
-				return nil
-			}
-			if a.Op == syntax.Assgn {
-				word, ok := a.X.(*syntax.Word)
-				if !ok {
-					return nil
-				}
-				for _, wp := range word.Parts {
-					switch p := wp.(type) {
-					case *syntax.Lit:
-						name = p.Value
-						startLine, startChar = p.Pos().Line(), p.Pos().Col()
-						endLine, endChar = p.End().Line(), p.End().Col()
-					}
-				}
-			}
+			refNodes = append(refNodes,
+				arithmExprToRefNode(loop.Init, scope)...)
 		}
+		if loop.Cond != nil {
+			refNodes = append(refNodes,
+				arithmExprToRefNode(loop.Cond, scope)...)
+		}
+		if loop.Post != nil {
+			refNodes = append(refNodes,
+				arithmExprToRefNode(loop.Post, scope)...)
+		}
+
 	}
 
-	return &RefNode{
-		Node:      forClause,
-		Name:      name,
-		Scope:     nil,
-		StartLine: startLine,
-		StartChar: startChar,
-		EndLine:   endLine,
-		EndChar:   endChar,
-	}
-
+	return refNodes
 }
 
-func arithmExprToRefNode(arithmExpr syntax.ArithmExpr, scope *syntax.FuncDecl, parent syntax.Node) []RefNode {
+func arithmExprToRefNode(arithmExpr syntax.ArithmExpr, scope *syntax.FuncDecl) []RefNode {
 	var refNodes []RefNode
 
 	var walkArithm func(syntax.ArithmExpr)
@@ -360,7 +348,7 @@ func arithmExprToRefNode(arithmExpr syntax.ArithmExpr, scope *syntax.FuncDecl, p
 					}
 
 					refNodes = append(refNodes, RefNode{
-						Node:      parent,
+						Node:      lit,
 						Name:      name,
 						Scope:     scope,
 						StartLine: lit.Pos().Line(),
