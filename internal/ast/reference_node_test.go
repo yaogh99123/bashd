@@ -105,3 +105,127 @@ echo "$a $b $c"
 		}
 	}
 }
+
+func Test_RefNodes_Arithmetic(t *testing.T) {
+	input := `
+a=1
+b=2
+
+echo $((a + b))
+((a++))
+((c = a + b))
+
+for ((i=0; i<10; i++)); do
+  echo $i
+done
+`
+	fileAst, _ := ParseDocument(input, "", false)
+	refNodes := fileAst.RefNodes(true)
+
+	expected := []struct {
+		name string
+		line uint
+	}{
+		{"a", 2},
+		{"b", 3},
+
+		// echo
+		{"echo", 5},
+		{"a", 5},
+		{"b", 5},
+
+		// ((a++))
+		{"a", 6},
+
+		// ((c = a + b))
+		{"c", 7},
+		{"a", 7},
+		{"b", 7},
+
+		// for ((i=0; i<10; i++))
+		{"i", 9},
+		{"i", 9},
+		{"i", 9},
+
+		{"echo", 10},
+		{"i", 10},
+	}
+
+	if len(refNodes) != len(expected) {
+		t.Fatalf("expected %d refs, got %d", len(expected), len(refNodes))
+	}
+
+	for i := range expected {
+		if refNodes[i].Name != expected[i].name {
+			t.Errorf("expected name %q, got %q", expected[i].name, refNodes[i].Name)
+		}
+		if refNodes[i].StartLine != expected[i].line {
+			t.Errorf("expected line %d, got %d", expected[i].line, refNodes[i].StartLine)
+		}
+	}
+}
+
+func Test_FindRefsInFile_Arithmetic(t *testing.T) {
+	input := `
+a=1
+
+foo() {
+  local a=2
+  echo $((a + 1))
+}
+
+echo $((a + 1))
+`
+	fileAst, _ := ParseDocument(input, "", false)
+
+	tests := []struct {
+		cursor     Cursor
+		name       string
+		startLines []uint
+	}{
+		{NewCursor(1, 1), "a", []uint{2, 9}},  // global `a`
+		{NewCursor(4, 9), "a", []uint{5, 6}}, // local `a`
+	}
+
+	for _, tt := range tests {
+		refNodes := fileAst.FindRefsInFile(tt.cursor, true)
+
+		if len(refNodes) == 0 {
+			t.Fatalf("no refs found for %s", tt.name)
+		}
+
+		for _, r := range refNodes {
+			if r.Name != tt.name {
+				t.Errorf("expected name %q, got %q", tt.name, r.Name)
+			}
+			if !slices.Contains(tt.startLines, r.StartLine) {
+				t.Errorf("unexpected line %d for %s", r.StartLine, tt.name)
+			}
+		}
+	}
+}
+
+func Test_RefNodes_Arithmetic_WithParamExp(t *testing.T) {
+	input := `
+a=1
+echo $(( $a + 1 ))
+`
+	fileAst, _ := ParseDocument(input, "", false)
+	refNodes := fileAst.RefNodes(true)
+
+	expectedNames := []string{
+		"a", // definition
+		"echo",
+		"a", // arithmetic reference
+	}
+
+	if len(refNodes) != len(expectedNames) {
+		t.Fatalf("expected %d refs, got %d", len(expectedNames), len(refNodes))
+	}
+
+	for i := range expectedNames {
+		if refNodes[i].Name != expectedNames[i] {
+			t.Errorf("expected %q, got %q", expectedNames[i], refNodes[i].Name)
+		}
+	}
+}
