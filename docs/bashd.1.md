@@ -48,19 +48,21 @@ the Go sh package and featuring ShellCheck integration for real-time linting.
   rules. All other rules will be disabled.
 
 - **--fmt-binary-next-line**
-  On format, binary operators will appear on the next line when a binary
-  command, such as a _|_, _&&_ or _||_, spans multiple lines. A `_\\_` will be
+  On format, binary operators will appear on the next line when a binary command,
+  such as a **|**, **&&** or **||**, spans multiple lines. A **`\\`** will be
   used.
 
+
 - **--fmt-case-indent**
-  On format, _switch_ cases will be indented. As such, _switch_ case bodies will
-  be two levels deeper than the _switch_ itself.
+  On format, **switch** cases will be indented. As such, **switch** case bodies
+  will be two levels deeper than the **switch** itself.
+
 
 - **--fmt-func-next-line**
   On format, function opening braces are placed on a separate line.
 
 - **--fmt-space-redirects**
-  On format, redirect operators such as _>_ will be followed by a space.
+  On format, redirect operators such as **>** will be followed by a space.
 
 - **-h**, **--help**
   Print a help message.
@@ -89,33 +91,34 @@ _style_, _info_, _warning_ or _error_. Default: _style_
 
 As the time of writing the following optional lints are available:
 
-| Rule name                    | Description                                                 |
-| ---------------------------- | ----------------------------------------------------------- |
-| _add-default-case_           | Suggest adding a default case in `case` statements          |
-| _avoid-negated-conditions_   | Suggest removing unnecessary comparison negations           |
-| _avoid-nullary-conditions_   | Suggest explicitly using -n in `[ $var ]`                   |
-| _check-extra-masked-returns_ | Check for additional cases where exit codes are masked      |
-| _check-set-e-suppressed_     | Notify when set -e is suppressed during function invocation |
-| _check-unassigned-uppercase_ | Warn when uppercase variables are unassigned                |
-| _deprecate-which_            | Suggest 'command -v' instead of 'which'                     |
-| _quote-safe-variables_       | Suggest quoting variables without metacharacters            |
-| _require-double-brackets_    | Require [[ and warn about [ in Bash/Ksh                     |
-| _require-variable-braces_    | Suggest putting braces around all variable references       |
-| _useless-use-of-cat_         | Check for Useless Use Of Cat (UUOC)                         |
+| Rule name                    | Description                                                     |
+| ---------------------------- | --------------------------------------------------------------- |
+| _add-default-case_           | Suggest adding a default case in **case** statements            |
+| _avoid-negated-conditions_   | Suggest removing unnecessary comparison negations               |
+| _avoid-nullary-conditions_   | Suggest explicitly using **-n** in **[ $var ]**                 |
+| _check-extra-masked-returns_ | Check for additional cases where exit codes are masked          |
+| _check-set-e-suppressed_     | Notify when **set -e** is suppressed during function invocation |
+| _check-unassigned-uppercase_ | Warn when uppercase variables are unassigned                    |
+| _deprecate-which_            | Suggest **command -v** instead of **which**                     |
+| _quote-safe-variables_       | Suggest quoting variables without metacharacters                |
+| _require-double-brackets_    | Require **[[** and warn about **[** in Bash/Ksh                 |
+| _require-variable-braces_    | Suggest putting braces around all variable references           |
+| _useless-use-of-cat_         | Check for Useless Use Of Cat (UUOC)                             |
+
 
 ## format
 ---
 - **binary_next_line**
   Binary operators will appear on the next line when a binary
-  command, such as a _|_, _&&_ or _||_, spans multiple lines. A _`\\`_ will be
-  used between lines.
+  command, such as a **|**, **&&** or **||**, spans multiple lines. A **`\\`**
+  will be used between lines.
 
 - **case_indent**
-  Switch cases will be indented. As such, _switch_ case bodies will
-  be two levels deeper than the _switch_ itself.
+  Switch cases will be indented. As such, **switch** case bodies will
+  be two levels deeper than the **switch** itself.
 
 - **space_redirects**
-  Redirect operators such as _>_ will be followed by a space.
+  Redirect operators such as **>** will be followed by a space.
 
 - **func_next_line**
   Function opening braces are placed on a separate line.
