@@ -18,12 +18,25 @@ func getDocumentation(command string) string {
 		documentation = runMan(command)
 	}
 
-	return strings.Trim(documentation, "\n")
+	doc := strings.Trim(documentation, "\n")
+	if doc == "" {
+		return " " // 返回一个空格字符，避免 null/empty 导致的 LSP 异常
+	}
+	return doc
 }
 
 func runMan(command string) string {
-	manCmd := exec.Command("man", "-p", "cat", command)
-	colCmd := exec.Command("col", "-bx")
+	manPath, err := exec.LookPath("man")
+	if err != nil {
+		manPath = "/usr/bin/man" // 兜底路径
+	}
+	colPath, err := exec.LookPath("col")
+	if err != nil {
+		colPath = "/usr/bin/col"
+	}
+
+	manCmd := exec.Command(manPath, "-p", "cat", command)
+	colCmd := exec.Command(colPath, "-bx")
 
 	manOutput, err := runPipe(manCmd, colCmd)
 	if err != nil {
@@ -33,8 +46,17 @@ func runMan(command string) string {
 }
 
 func runHelp(command string) string {
-	helpCmd := exec.Command("bash", "-c", fmt.Sprintf("help %s", command))
-	colCmd := exec.Command("col", "-bx")
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		bashPath = "/bin/bash" // 兜底路径
+	}
+	colPath, err := exec.LookPath("col")
+	if err != nil {
+		colPath = "/usr/bin/col"
+	}
+
+	helpCmd := exec.Command(bashPath, "-c", fmt.Sprintf("help %s", command))
+	colCmd := exec.Command(colPath, "-bx")
 
 	helpOutput, err := runPipe(helpCmd, colCmd)
 	if err != nil {

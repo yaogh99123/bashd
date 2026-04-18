@@ -43,8 +43,8 @@ type CompletionItem struct {
 	LabelDetails *CompletionItemLabelDetails `json:"labelDetails"`
 	Kind         CompletionItemKind          `json:"kind"`
 	// Tags
-	Detail        string         `json:"detail"`
-	Documentation *MarkupContent `json:"documentation"` // Can make this markdown
+	Detail        string `json:"detail"`
+	Documentation string `json:"documentation"` // Switched to string for maximum compatibility
 	// Deprecated
 	// Preselect
 	// SortText

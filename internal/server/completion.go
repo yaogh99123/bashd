@@ -43,13 +43,14 @@ func handleCompletionItemResolve(
 	request *lsp.CompletionItemResolveRequest,
 ) *lsp.CompletionItemResolveResponse {
 	completionItem := request.Params.CompletionItem
-	documentation := getDocumentation(completionItem.Label)
-	mdDocumentation := fmt.Sprintf("```man\n%s\n```", documentation)
 
-	completionItem.Documentation = &lsp.MarkupContent{
-		Kind:  lsp.MarkupKindMarkdown,
-		Value: mdDocumentation,
+	documentation := getDocumentation(completionItem.Label)
+	// Provide a default if empty to satisfy the client
+	if documentation == "" || documentation == " " {
+		documentation = fmt.Sprintf("No manual entry for %s", completionItem.Label)
 	}
+
+	completionItem.Documentation = documentation
 
 	response := &lsp.CompletionItemResolveResponse{
 		Response: lsp.Response{
@@ -76,7 +77,7 @@ func completeDollar(ast *ast.Ast, state *State) []lsp.CompletionItem {
 				Label:         assign.Name.Value,
 				Kind:          lsp.CompletionVariable,
 				Detail:        "",
-				Documentation: nil,
+				Documentation: "",
 			})
 		}
 
@@ -85,12 +86,12 @@ func completeDollar(ast *ast.Ast, state *State) []lsp.CompletionItem {
 
 	// Environment variables
 	for envVarName, envVarValue := range state.EnvVars {
-		result = append(result, lsp.CompletionItem{
-			Label:         envVarName,
-			Kind:          lsp.CompletionConstant,
-			Detail:        envVarValue,
-			Documentation: nil,
-		})
+			result = append(result, lsp.CompletionItem{
+				Label:         envVarName,
+				Kind:          lsp.CompletionConstant,
+				Detail:        envVarValue,
+				Documentation: "",
+			})
 	}
 
 	return result
@@ -104,7 +105,7 @@ func completionKeywords() []lsp.CompletionItem {
 			Label:         keyword,
 			Kind:          lsp.CompletionKeyword,
 			Detail:        "",
-			Documentation: nil,
+			Documentation: "",
 		}
 		result = append(result, completionItem)
 	}
@@ -120,7 +121,7 @@ func completionBuiltins() []lsp.CompletionItem {
 			Label:         builtin,
 			Kind:          lsp.CompletionFunction,
 			Detail:        "",
-			Documentation: nil,
+			Documentation: "",
 		}
 		result = append(result, completionItem)
 	}
@@ -143,7 +144,7 @@ func completionFunctions(ast *ast.Ast) []lsp.CompletionItem {
 				Label:         funcDecl.Name.Value,
 				Kind:          lsp.CompletionFunction,
 				Detail:        "",
-				Documentation: nil,
+				Documentation: "",
 			})
 		}
 
@@ -161,7 +162,7 @@ func completionPathItem(state *State) []lsp.CompletionItem {
 			Label:         pathItem,
 			Kind:          lsp.CompletionFunction,
 			Detail:        "",
-			Documentation: nil,
+			Documentation: "",
 		}
 		result = append(result, completionItem)
 	}
